@@ -23,8 +23,7 @@ from protorpc import messages
 from protorpc import message_types
 from protorpc import remote
 
-from google.appengine.api import memcache
-from google.appengine.api import taskqueue
+from google.net.proto.ProtocolBuffer import ProtocolBufferDecodeError
 from google.appengine.ext import ndb
 
 from models import ConflictException
@@ -58,6 +57,7 @@ EMAIL_SCOPE = endpoints.EMAIL_SCOPE
 API_EXPLORER_CLIENT_ID = endpoints.API_EXPLORER_CLIENT_ID
 MEMCACHE_ANNOUNCEMENTS_KEY = "RECENT_ANNOUNCEMENTS"
 MEMCACHE_FEATURED_SPEAKER_KEY = "FEATURED_SPEAKER"
+SPEAKER_TPL = ('This session\'s featured speaker is: %s')
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -352,19 +352,20 @@ class ConferenceApi(remote.Service):
 
         # return individual ConferenceForm object per Conference
         return ConferenceForms(
-                items=[self._copyConferenceToForm(conf, names[conf.organizerUserId]) for conf in \
-                conferences]
+                items=[self._copyConferenceToForm(conf, names[conf.organizerUserId]) for conf in conferences]
         )
 
 # - - - Session objects - - - - - - - - - - - - - - - - -
 
-    def _copySessionToForm(self, conf, displayName):
+    def _copySessionToForm(self, session):
         """Copy relevant fields from Session to SessionForm."""
         sf = SessionForm()
         for field in sf.all_fields():
             if hasattr(session, field.name):
                 # convert Date to date string; just copy others
-                if field.name.endswith('Date'):
+                if field.name == ('Date'):
+                    setattr(sf, field.name, str(getattr(session, field.name)))
+                elif field.name == 'startTime':
                     setattr(sf, field.name, str(getattr(session, field.name)))
                 else:
                     setattr(sf, field.name, getattr(session, field.name))
@@ -384,13 +385,13 @@ class ConferenceApi(remote.Service):
         if not request.name:
             raise endpoints.BadRequestException("Session 'name' field required")
 
-        key = ndb.Key(urlsafe=request.websafeConferenceKey).get()
+        conf = ndb.Key(urlsafe=request.websafeConferenceKey).get()
 
-        if not key:
+        if not conf:
             raise endpoints.NotFoundException(
                 'Sorry, we couldn\'t find a conference with that key!')
 
-        if user_id != key.organizer.UserId:
+        if user_id != conf.organizerUserId:
             'Sorry, only the organizer of this conference can update the session.'
 
         # copy SessionForm/ProtoRPC Message into dict
@@ -405,15 +406,13 @@ class ConferenceApi(remote.Service):
                 data[df] = SESSION_DEFAULTS[df]
                 setattr(request, df, SESSION_DEFAULTS[df])
 
-        # convert dates from strings to Date objects; set month based on start_date
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
 
         if data['startTime']:
-            data['startTime'] = datetime.strptime(data['startTime'][:5], "%Y-%m-%d").time()
+            data['startTime'] = datetime.strptime(data['startTime'][:5], "%H:%M").time()
 
-        # generate Profile Key based on user ID and Conference
-        # ID based on Profile key get Conference key from ID
+        # generate Session Key based on conference
         c_key = ndb.Key(urlsafe=request.websafeConferenceKey)
         s_id = Session.allocate_ids(size=1, parent=c_key)[0]
         s_key = ndb.Key(Session, s_id, parent=c_key)
@@ -423,7 +422,8 @@ class ConferenceApi(remote.Service):
         # creation of Session & return (modified) SessionForm
         Session(**data).put()
         sessions = Session.query(Session.speaker == data['speaker']).count()
-        taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
+        if sessions > 1:
+            taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
 
         return self._copySessionToForm(request)
 
@@ -438,7 +438,7 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getConferenceSessions')
     def getConferenceSessions(self, request):
         """Return requested conference sessions"""
-        c_key = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
+        conf = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
         sessions = Session.query(ancestor=conf)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -448,7 +448,6 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getConferenceSessionsByType')
     def getSessionsByType(self, request):
         """Return sessions queried by type"""
-        c_key = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
         sessions = Session.query(Session.typeOfSession == request.typeOfSession)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -467,7 +466,6 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getConferenceSessionsByName')
     def getSessionsByName(self, request):
         """Return sessions queried by name."""
-        c_key = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
         sessions = Session.query(Session.name == request.name)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -477,7 +475,6 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getSessionsByHighlights')
     def getSessionsByHighlights(self, request):
         """Return sessions queried by highlights"""
-        c_key = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
         sessions = Session.query(Session.highlights == request.highlights)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -491,11 +488,14 @@ class ConferenceApi(remote.Service):
         "Adding a session to a user's wishlist"
         profile = self._getProfileFromUser()
         wssk = request.websafeSessionKey
-        wssk = ndb.Key(urlsafe=wssk)
-        if wssk not in profile.websafeSessionKey:
-            return self._doProfile(request)
-        else:
-            return 'This session is in your wishlist already!'
+        try:
+            wssk = ndb.Key(urlsafe=wssk)
+            if wssk not in profile.websafeSessionKey:
+                return self._doProfile(request)
+            else:
+                return 'This session is in your wishlist already!'
+        except ProtocolBufferDecodeError:
+            wssk = None
 
     @endpoints.method(WishlistForm, SessionForms,
         path="profile/wishlist",
@@ -519,7 +519,10 @@ class ConferenceApi(remote.Service):
         """Delete a session from a user's wishlist"""
         profile = self._getProfileFromUser()
         wssk = request.websafeSessionKey
-        return self._doProfile(request)
+        if wssk in profile.websafeSessionKey:
+            return self._doProfile(request)
+        else:
+            return 'That session is not in your wishlist'
 
 # - - - Featured Speaker - - - - - - - - - - - - - - - - - - -
 
@@ -532,21 +535,21 @@ class ConferenceApi(remote.Service):
         if len(sessions) > 1:
             # If a speaker is presenting more than one session,
             # format announcement and set it in memcache
-            announcement = '%s %s' % (
-                'The featured speaker for this session'
-                'will be:',
-                ', '.join(sessions.name for session in sessions))
-            memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, announcement)
+            featuredSpeaker = (SPEAKER_TPL % speaker) + ' ' + 'Sessions:'
+            # Set Memcache
+            for session in sessions:
+                featuredSpeaker += ' ' + session.name
+            memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, featuredSpeaker)
         else:
-            announcement = ""
-        return announcement
+            featuredSpeaker = (memcache.get(MEMCACHE_FEATURED_SPEAKER_KEY))
+        return featuredSpeaker
 
     @endpoints.method(message_types.VoidMessage, StringMessage,
         path='/conference/featuredSpeaker',
         http_method='GET', name='getFeaturedSpeaker')
     def getFeaturedSpeaker(self, request):
         """Return the Featured Speaker using Memcache."""
-        return StringMessage(data=memcache.get(MEMCACHE_FEATURED_SPEAKER_KEY))
+        return StringMessage(data=memcache.get(MEMCACHE_FEATURED_SPEAKER_KEY) or "")
 
 
 
@@ -584,7 +587,7 @@ class ConferenceApi(remote.Service):
                 key = p_key,
                 displayName = user.nickname(),
                 mainEmail= user.email(),
-                teeShirtSize = str(TeeShirtSize.NOT_SPECIFIED),
+                teeShirtSize = str(TeeShirtSize.NOT_SPECIFIED)
             )
             profile.put()
 
@@ -598,16 +601,15 @@ class ConferenceApi(remote.Service):
 
         # if saveProfile(), process user-modifyable fields
         if save_request:
-            for field in ('displayName', 'teeShirtSize'):
+            for field in ('displayName', 'teeShirtSize', 'wishlistSessionKey'):
                 if hasattr(save_request, field):
                     val = getattr(save_request, field)
                     if val:
-                        setattr(prof, field, str(val))
-                        #if field == 'teeShirtSize':
-                        #    setattr(prof, field, str(val).upper())
-                        #else:
-                        #    setattr(prof, field, val)
-            prof.put()
+                        if field == 'wishlistSessionKey':
+                            prof.wishlistSessionKey.append(str(val))
+                        else:
+                            setattr(prof, field, str(val))
+                        prof.put()
 
         # return ProfileForm
         return self._copyProfileToForm(prof)

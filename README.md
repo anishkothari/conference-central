@@ -1,16 +1,25 @@
 # Conference Central
-Project 4 of the Udacity Fullstack Nanodegree. This application runs on Google App Engine application.
+Project 4 of the Udacity Fullstack Nanodegree. This application runs on Google App Engine.
 
 Features include the ability to create conferences, sessions, view conferences and sessions. Users can register/unregister for conferences, add/remove sessions to their wishlists after logging in with their Google credentials. Using the Task Queue, e-mails are sent to the conference organizer after they have created a conference. Using Memcache, announcements are made when there are limited seats remaining in a conference and if there a speaker presenting more than one session, they will be set as the featured speaker for the conference.
+
+The following property types are used for sessions:
+name = ndb.StringProperty(required=True)
+highlights = ndb.StringProperty
+speaker = ndb.StringProperty()
+duration = ndb.IntegerProperty()
+typeOfSession = ndb.StringProperty()
+date = ndb.DateProperty()
+startTime = ndb.TimeProperty()
 
 Design choices for session and speaker functionality include the appropriate property types to be stored in NDB. Sessions are implemented similar to conferences, although queries are implemented somewhat differently. For the ease of testing (and lack of a front-end), queries are independent of each other.
 Speaker functionality is implemented by saving the appropriate speakers in Memcache and retrieving it when displaying the conference details.
 
-Additional queries implemented find sessions by a speaker's name and by session highlights. The purpose of the highlights query is to find similar sessions so user's can add them to their wishlists easily.
+Additional queries implemented find sessions by a speaker's name (getSessionsByName) and by session highlights (getSessionsByHighlights). The purpose of the highlights query is to find similar sessions so user's can add them to their wishlists easily.
 
 How would you handle a query for all non-workshop sessions before 7 pm? What is the problem for implementing this query? What ways to solve it did you think of?
 
-The problem implementing this query is that multiple inequalities can't be queried in datastore. I would implement this query using two queries - one to find non-workshop sessions and then query that result set for sessions before 7pm.
+The problem implementing this query is that multiple inequalities can't be queried in datastore on more than one field (typeOfSession and startTime in this case). I would implement this using two queries - one to find non-workshop sessions and another query for sessions before 7pm. The query to find non-workshop sessions should use an equality filter and the time query could use an inequality filter.
 
 ## Products
 - [App Engine][1]
