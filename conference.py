@@ -538,9 +538,6 @@ class ConferenceApi(remote.Service):
             for session in sessions:
                 featuredSpeaker += ' ' + session.name
             memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, featuredSpeaker)
-        else:
-            featuredSpeaker = (memcache.get(MEMCACHE_FEATURED_SPEAKER_KEY))
-        return featuredSpeaker
 
     @endpoints.method(message_types.VoidMessage, StringMessage,
         path='/conference/featuredSpeaker',
@@ -604,7 +601,7 @@ class ConferenceApi(remote.Service):
                     val = getattr(save_request, field)
                     if val:
                         if field == 'websafeSessionKey':
-                            prof.wishlistSessionKey.append(str(val))
+                            prof.websafeSessionKey.append(str(val))
                         else:
                             setattr(prof, field, str(val))
                         prof.put()
