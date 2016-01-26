@@ -363,7 +363,7 @@ class ConferenceApi(remote.Service):
         for field in sf.all_fields():
             if hasattr(session, field.name):
                 # convert Date to date string; just copy others
-                if field.name == ('Date'):
+                if field.name == ('date'):
                     setattr(sf, field.name, str(getattr(session, field.name)))
                 elif field.name == 'startTime':
                     setattr(sf, field.name, str(getattr(session, field.name)))
@@ -422,8 +422,7 @@ class ConferenceApi(remote.Service):
         # creation of Session & return (modified) SessionForm
         Session(**data).put()
         sessions = Session.query(Session.speaker == data['speaker']).count()
-        if sessions > 1:
-            taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
+        taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
 
         return self._copySessionToForm(request)
 
@@ -528,8 +527,7 @@ class ConferenceApi(remote.Service):
 
     @staticmethod
     def _cacheSpeaker(speaker):
-        """Set Featured Speaker & assign to memcache; used by
-        memcache cron job & set_featured_speaker().
+        """Set Featured Speaker & assign to memcache; used to set_featured_speaker().
         """
         sessions = Session.query(Session.speaker == speaker).fetch()
         if len(sessions) > 1:
@@ -601,11 +599,11 @@ class ConferenceApi(remote.Service):
 
         # if saveProfile(), process user-modifyable fields
         if save_request:
-            for field in ('displayName', 'teeShirtSize', 'wishlistSessionKey'):
+            for field in ('displayName', 'teeShirtSize', 'websafeSessionKey'):
                 if hasattr(save_request, field):
                     val = getattr(save_request, field)
                     if val:
-                        if field == 'wishlistSessionKey':
+                        if field == 'websafeSessionKey':
                             prof.wishlistSessionKey.append(str(val))
                         else:
                             setattr(prof, field, str(val))
