@@ -19,7 +19,7 @@ Design choices for session and speaker functionality include the appropriate pro
 Sessions are implemented similar to conferences, although queries are implemented somewhat differently. For the ease of testing (and lack of a front-end), queries are independent of each other.
 Speaker functionality is implemented by saving the appropriate speakers in Memcache and retrieving it when displaying the conference details.
 
-Additional queries implemented find sessions by a speaker's name (getSessionsByName) and by session highlights (getSessionsByHighlights). The purpose of the highlights query is to find similar sessions so user's can add them to their wishlists easily.
+Additional queries implemented find sessions by a speaker's name (getSessionsByName) and by session highlights (getSessionsByHighlights). The purpose of the highlights query is to find similar sessions so users can add them to their wishlists easily.
 
 How would you handle a query for all non-workshop sessions before 7 pm? What is the problem for implementing this query? What ways to solve it did you think of?
 
