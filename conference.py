@@ -111,6 +111,10 @@ SESS_POST_REQUEST = endpoints.ResourceContainer(
     websafeConferenceKey=messages.StringField(1)
 )
 
+WISHLIST_POST_REQUEST = endpoints.ResourceContainer(
+    websafeSessionKey = messages.StringField(1)
+)
+
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
@@ -480,22 +484,33 @@ class ConferenceApi(remote.Service):
 
 # - - - Wishlist objects - - - - - - - - - - - - - - - - - - -
 
-    @endpoints.method(WishlistForm, ProfileForm,
-        path="profile/addToWishlist",
+    @endpoints.method(WISHLIST_POST_REQUEST, BooleanMessage,
+        path="addToWishlist/{websafeSessionKey}",
         http_method="POST", name="addToWishlist")
     def addToWishlist(self, request):
         "Adding a session to a user's wishlist"
-        profile = self._getProfileFromUser()
-        wssk = request.websafeSessionKey
-        try:
-            wssk = ndb.Key(urlsafe=wssk)
-            if wssk not in profile.websafeSessionKey:
-                return self._doProfile(request)
-            else:
-                return 'This session is in your wishlist already!'
-        except ProtocolBufferDecodeError:
-            wssk = None
+        val=None
 
+        wssk = request.websafeSessionKey
+        session = ndb.Key(urlsafe=wssk).get()
+        cKey = session.key.parent().urlsafe()
+
+        conference = ndb.Key(urlsafe=cKey).get()
+        if not conference:
+            raise endpoints.NotFoundException(
+                'No conference found with the session key: %s' % wssk)
+
+        profile = self._getProfileFromUser()
+
+        if wssk in profile.sessionWishlist:
+            raise ConflictException(
+                'This session is in your wishlist already!')
+        else:
+            profile.sessionWishlist.append(wssk)
+            profile.put()
+            val=True
+
+        return BooleanMessage(data=val)
     @endpoints.method(WishlistForm, SessionForms,
         path="profile/wishlist",
         name="getWishlist")
@@ -505,23 +520,33 @@ class ConferenceApi(remote.Service):
         if not user:
             raise endpoints.UnauthorizedException('Authorization required')
         profile = self._getProfileFromUser()
-        wk = [ndb.Key(urlsafe=keys) for keys in profile.websafeSessionKey]
+        wk = [ndb.Key(urlsafe=keys) for keys in profile.sessionWishlist]
         sessions = ndb.get_multi(wk)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
 
-    @endpoints.method(WishlistForm, ProfileForm,
-        path="profile/removeFromWishlist",
-        http_method='DELETE',
+    @endpoints.method(WISHLIST_POST_REQUEST, BooleanMessage,
+        path="removeFromWishlist/{websafeSessionKey}",
+        http_method='POST',
         name='removeFromWishlist')
     def removeFromWishlist(self, request):
         """Delete a session from a user's wishlist"""
-        profile = self._getProfileFromUser()
+        val=None
+
         wssk = request.websafeSessionKey
-        if wssk in profile.websafeSessionKey:
-            return self._doProfile(request)
+        session = ndb.Key(urlsafe=wssk)
+        profile = self._getProfileFromUser()
+
+        if not wssk in profile.sessionWishlist:
+            raise ConflictException(
+                'This session is not in your wishlist!')
         else:
-            return 'That session is not in your wishlist'
+            profile.sessionWishlist.remove(wssk)
+            profile.put()
+            val=True
+
+        return BooleanMessage(data=val)
+
 
 # - - - Featured Speaker - - - - - - - - - - - - - - - - - - -
 
@@ -529,14 +554,18 @@ class ConferenceApi(remote.Service):
     def _cacheSpeaker(speaker):
         """Set Featured Speaker & assign to memcache; used to set_featured_speaker().
         """
-        sessions = Session.query(Session.speaker == speaker).fetch()
-        if len(sessions) > 1:
+        sessions = Session.query(
+            Session.speaker == speaker, ancestor=ndb.Key(
+                urlsafe=request.websafeConferenceKey))
+
+        speaker = [sessions.name \
+            for sessions in speakerSessions]
+
+        if len(speaker) > 1:
             # If a speaker is presenting more than one session,
             # format announcement and set it in memcache
             featuredSpeaker = (SPEAKER_TPL % speaker) + ' ' + 'Sessions:'
             # Set Memcache
-            for session in sessions:
-                featuredSpeaker += ' ' + session.name
             memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, featuredSpeaker)
 
     @endpoints.method(message_types.VoidMessage, StringMessage,
