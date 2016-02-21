@@ -422,10 +422,8 @@ class ConferenceApi(remote.Service):
         s_key = ndb.Key(Session, s_id, parent=c_key)
         data['key'] = s_key
 
-        # create Session, send email to organizer confirming
         # creation of Session & return (modified) SessionForm
         Session(**data).put()
-        sessions = Session.query(Session.speaker == data['speaker']).count()
         taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
 
         return self._copySessionToForm(request)
@@ -488,18 +486,11 @@ class ConferenceApi(remote.Service):
         path="addToWishlist/{websafeSessionKey}",
         http_method="POST", name="addToWishlist")
     def addToWishlist(self, request):
-        "Adding a session to a user's wishlist"
+        """Adding a session to a user's wishlist"""
         val=None
 
         wssk = request.websafeSessionKey
         session = ndb.Key(urlsafe=wssk).get()
-        cKey = session.key.parent().urlsafe()
-
-        conference = ndb.Key(urlsafe=cKey).get()
-        if not conference:
-            raise endpoints.NotFoundException(
-                'No conference found with the session key: %s' % wssk)
-
         profile = self._getProfileFromUser()
 
         if wssk in profile.sessionWishlist:
@@ -511,6 +502,7 @@ class ConferenceApi(remote.Service):
             val=True
 
         return BooleanMessage(data=val)
+
     @endpoints.method(WishlistForm, SessionForms,
         path="profile/wishlist",
         name="getWishlist")
@@ -554,12 +546,18 @@ class ConferenceApi(remote.Service):
     def _cacheSpeaker(speaker):
         """Set Featured Speaker & assign to memcache; used to set_featured_speaker().
         """
+        # Make sure there is a conference corresponding to the key
+        conference = ndb.Key(urlsafe=websafeConferenceKey).get()
+        if not conference:
+            raise endpoints.NotFoundException('We could not find a conference with that key!')
+
+        # get all sessions at the conference
         sessions = Session.query(
             Session.speaker == speaker, ancestor=ndb.Key(
                 urlsafe=request.websafeConferenceKey))
 
-        speaker = [sessions.name \
-            for sessions in speakerSessions]
+        # retrieve the names of the speakers
+        speaker = [sessions.name for sessions in speakerSessions]
 
         if len(speaker) > 1:
             # If a speaker is presenting more than one session,

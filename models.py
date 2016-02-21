@@ -132,8 +132,6 @@ class SessionForm(messages.Message):
     date = messages.StringField(6)
     startTime = messages.StringField(7)
     websafeKey = messages.StringField(8)
-    conferenceName = messages.StringField(9)
-    websafeConferenceKey = messages.StringField(10)
 
 class SessionForms(messages.Message):
     """SessionForms -- multiple Session outbound form message"""
@@ -142,7 +140,6 @@ class SessionForms(messages.Message):
 class SessionsByTypeForm(messages.Message):
     """SessionsByTypeForm -- Sessions outbound form message"""
     typeOfSession = messages.StringField(1)
-    websafeConferenceKey = messages.StringField(2)
 
 class SessionsBySpeakerForm(messages.Message):
     """SessionsBySpeakerForm -- Sessions outbound form message"""
@@ -151,12 +148,10 @@ class SessionsBySpeakerForm(messages.Message):
 class SessionsByNameForm(messages.Message):
     """SessionsByNameForm -- Sessions outbound form message"""
     name = messages.StringField(1)
-    websafeConferenceKey = messages.StringField(2)
 
 class SessionsByHighlightsForm(messages.Message):
     """SessionsByHighlightsForm -- Sessions outbound form message"""
     highlights = messages.StringField(1)
-    websafeConferenceKey = messages.StringField(2)
 
 class WishlistForm(messages.Message):
     """WishlistForm - Wishlist session inbound form"""
