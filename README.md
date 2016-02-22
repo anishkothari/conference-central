@@ -23,8 +23,7 @@ Additional queries implemented find sessions by a session's name (getSessionsByN
 
 How would you handle a query for all non-workshop sessions before 7 pm? What is the problem for implementing this query? What ways to solve it did you think of?
 
-The problem implementing this query is that multiple inequalities can't be queried in datastore on more than one field (typeOfSession and startTime in this case). I would implement this using two queries - one to find non-workshop sessions and another query for sessions before 7pm. The query to find non-workshop sessions should use an equality filter and the time query could use an inequality filter.
-
+The problem implementing this query is that multiple inequalities can't be queried in datastore on more than one field (typeOfSession and startTime in this case). I would implement this by using a query to find the non-workshop sessions. Then I would use a time variable set to 7pm and filter the sessions found from the previous query against the time variable to find the sessions before 7pm.
 ## Products
 - [App Engine][1]
 

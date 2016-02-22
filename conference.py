@@ -396,13 +396,13 @@ class ConferenceApi(remote.Service):
                 'Sorry, we couldn\'t find a conference with that key!')
 
         if user_id != conf.organizerUserId:
-            'Sorry, only the organizer of this conference can update the session.'
+            raise endpoints.UnauthorizedException(
+            'Sorry, only the organizer of this conference can update the session.')
 
         # copy SessionForm/ProtoRPC Message into dict
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
         del data['websafeKey']
         del data['websafeConferenceKey']
-        del data['conferenceName']
 
         # add default values for those missing (both data model & outbound Message)
         for df in SESSION_DEFAULTS:
@@ -424,9 +424,12 @@ class ConferenceApi(remote.Service):
 
         # creation of Session & return (modified) SessionForm
         Session(**data).put()
-        taskqueue.add(params={'speaker': data['speaker']}, url='/tasks/set_featured_speaker')
+        taskqueue.add(
+            params={'speaker': data['speaker'], 
+            "websafeConferenceKey": request.websafeConferenceKey},
+            url='/tasks/set_featured_speaker')
 
-        return self._copySessionToForm(request)
+        return s_key.get()
 
     @endpoints.method(SESS_POST_REQUEST, SessionForm, path='session',
         http_method='POST', name='createSession')
@@ -439,7 +442,7 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getConferenceSessions')
     def getConferenceSessions(self, request):
         """Return requested conference sessions"""
-        conf = ndb.Key(urlsafe=request.websafeConferenceKey).get().key
+        conf = ndb.Key(urlsafe=request.websafeConferenceKey)
         sessions = Session.query(ancestor=conf)
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -449,7 +452,12 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getConferenceSessionsByType')
     def getSessionsByType(self, request):
         """Return sessions queried by type"""
-        sessions = Session.query(Session.typeOfSession == request.typeOfSession)
+        sessions = Session.query(ancestor=ndb.Key(
+            urlsafe=request.websafeConferenceKey))
+
+        sessions = sessions.filter(
+            Session.typeOfSession == request.typeOfSession)
+
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
 
@@ -463,7 +471,7 @@ class ConferenceApi(remote.Service):
             items=[self._copySessionToForm(session) for session in sessions])
 
     @endpoints.method(SessionsByNameForm, SessionForms,
-        path='session/name/{websafeConferenceKey}',
+        path='session/name/',
         http_method='GET', name='getConferenceSessionsByName')
     def getSessionsByName(self, request):
         """Return sessions queried by name."""
@@ -472,7 +480,7 @@ class ConferenceApi(remote.Service):
             items=[self._copySessionToForm(session) for session in sessions])
 
     @endpoints.method(SessionsByHighlightsForm, SessionForms,
-        path='session/highlights/{websafeConferenceKey}',
+        path='session/highlights/',
         http_method='GET', name='getSessionsByHighlights')
     def getSessionsByHighlights(self, request):
         """Return sessions queried by highlights"""
@@ -543,7 +551,7 @@ class ConferenceApi(remote.Service):
 # - - - Featured Speaker - - - - - - - - - - - - - - - - - - -
 
     @staticmethod
-    def _cacheSpeaker(speaker):
+    def _cacheSpeaker(speaker, websafeConferenceKey):
         """Set Featured Speaker & assign to memcache; used to set_featured_speaker().
         """
         # Make sure there is a conference corresponding to the key
@@ -555,14 +563,18 @@ class ConferenceApi(remote.Service):
         sessions = Session.query(
             Session.speaker == speaker, ancestor=ndb.Key(
                 urlsafe=request.websafeConferenceKey))
+        speakers = s.filter(
+            Session.speaker == speaker)
 
-        # retrieve the names of the speakers
-        speaker = [sessions.name for sessions in speakerSessions]
+        speakerNames = [sessions.name for sessions in speakers]
 
-        if len(speaker) > 1:
+        # retrieve the names of the sessions
+        sessions = [sessions.name for sessions in speakerSessions]
+
+        if len(speakerNames) > 1:
             # If a speaker is presenting more than one session,
             # format announcement and set it in memcache
-            featuredSpeaker = (SPEAKER_TPL % speaker) + ' ' + 'Sessions:'
+            featuredSpeaker = speaker + ': ' + ', '.join(speakerNames)
             # Set Memcache
             memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, featuredSpeaker)
 
