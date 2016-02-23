@@ -42,7 +42,6 @@ from models import Session
 from models import SessionForm
 from models import SessionForms
 from models import SessionsBySpeakerForm
-from models import SessionsByTypeForm
 from models import SessionsByHighlightsForm
 from models import SessionsByNameForm
 from models import WishlistForm
@@ -57,7 +56,6 @@ EMAIL_SCOPE = endpoints.EMAIL_SCOPE
 API_EXPLORER_CLIENT_ID = endpoints.API_EXPLORER_CLIENT_ID
 MEMCACHE_ANNOUNCEMENTS_KEY = "RECENT_ANNOUNCEMENTS"
 MEMCACHE_FEATURED_SPEAKER_KEY = "FEATURED_SPEAKER"
-SPEAKER_TPL = ('This session\'s featured speaker is: %s')
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -104,6 +102,12 @@ CONF_POST_REQUEST = endpoints.ResourceContainer(
 SESS_GET_REQUEST = endpoints.ResourceContainer(
     message_types.VoidMessage,
     websafeConferenceKey=messages.StringField(1)
+)
+
+SESSION_TYPE_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeConferenceKey=messages.StringField(1),
+    typeOfSession=messages.StringField(2)
 )
 
 SESS_POST_REQUEST = endpoints.ResourceContainer(
@@ -425,11 +429,11 @@ class ConferenceApi(remote.Service):
         # creation of Session & return (modified) SessionForm
         Session(**data).put()
         taskqueue.add(
-            params={'speaker': data['speaker'], 
+            params={'speaker': data['speaker'],
             "websafeConferenceKey": request.websafeConferenceKey},
             url='/tasks/set_featured_speaker')
 
-        return s_key.get()
+        return self._copySessionToForm(s_key.get())
 
     @endpoints.method(SESS_POST_REQUEST, SessionForm, path='session',
         http_method='POST', name='createSession')
@@ -447,16 +451,21 @@ class ConferenceApi(remote.Service):
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
 
-    @endpoints.method(SessionsByTypeForm, SessionForms,
-        path='session/type/{websafeConferenceKey}',
-        http_method='GET', name='getConferenceSessionsByType')
+    @endpoints.method(SESSION_TYPE_GET_REQUEST, SessionForms,
+        path='session/type/{websafeConferenceKey}/{typeOfSession}',
+        http_method='GET', name='getSessionsByType')
     def getSessionsByType(self, request):
         """Return sessions queried by type"""
-        sessions = Session.query(ancestor=ndb.Key(
-            urlsafe=request.websafeConferenceKey))
 
-        sessions = sessions.filter(
-            Session.typeOfSession == request.typeOfSession)
+        conf = ndb.Key(urlsafe=request.websafeConferenceKey).get()
+        if not conf:
+            raise endpoints.NotFoundException(
+                'We could not find a conference with that key!'
+            )
+
+        #Return sessions at the specified conference
+        sessions = Session.query(ancestor=conf.key)
+        sessions = sessions.filter(Session.typeOfSession == request.typeOfSession)
 
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions])
@@ -471,8 +480,8 @@ class ConferenceApi(remote.Service):
             items=[self._copySessionToForm(session) for session in sessions])
 
     @endpoints.method(SessionsByNameForm, SessionForms,
-        path='session/name/',
-        http_method='GET', name='getConferenceSessionsByName')
+        path='session/name',
+        http_method='GET', name='getSessionsByName')
     def getSessionsByName(self, request):
         """Return sessions queried by name."""
         sessions = Session.query(Session.name == request.name)
@@ -480,7 +489,7 @@ class ConferenceApi(remote.Service):
             items=[self._copySessionToForm(session) for session in sessions])
 
     @endpoints.method(SessionsByHighlightsForm, SessionForms,
-        path='session/highlights/',
+        path='session/highlights',
         http_method='GET', name='getSessionsByHighlights')
     def getSessionsByHighlights(self, request):
         """Return sessions queried by highlights"""
@@ -559,24 +568,19 @@ class ConferenceApi(remote.Service):
         if not conference:
             raise endpoints.NotFoundException('We could not find a conference with that key!')
 
-        # get all sessions at the conference
-        sessions = Session.query(
-            Session.speaker == speaker, ancestor=ndb.Key(
-                urlsafe=request.websafeConferenceKey))
-        speakers = s.filter(
-            Session.speaker == speaker)
+        p_key = ndb.Key(Conference, conference.key.id())
 
-        speakerNames = [sessions.name for sessions in speakers]
+        #get sessions and filter them by featured speakers
+        sessions = Session.query(ancestor=p_key)
+        featuredSessions = sessions.filter(Session.speaker == speaker)
 
-        # retrieve the names of the sessions
-        sessions = [sessions.name for sessions in speakerSessions]
-
-        if len(speakerNames) > 1:
+        if featuredSessions.count() > 1:
             # If a speaker is presenting more than one session,
             # format announcement and set it in memcache
-            featuredSpeaker = speaker + ': ' + ', '.join(speakerNames)
+            featuredSpeaker = 'Speaker : %s will present these sessions %s' % (speaker, ', '.join(session.name for session in featuredSessions))
             # Set Memcache
             memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, featuredSpeaker)
+
 
     @endpoints.method(message_types.VoidMessage, StringMessage,
         path='/conference/featuredSpeaker',
